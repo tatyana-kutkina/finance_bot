@@ -15,7 +15,7 @@
 
 ### AI & ML (Интеллект)
 - **LLM Provider:** OpenAI API или DeepSeek 
-  - **NLP (Natural Language Processing):** GPT-4o-mini / GPT-4o (извлечение сущностей из текста)
+  - **NLP (Natural Language Processing):** GPT-4o-mini / GPT-4o / DeepSeek(извлечение сущностей из текста)
   - **STT (Speech-to-Text):** Whisper (транскрибация голосовых сообщений)
 - **Prompt Engineering:** Системные промпты для строгого форматирования ответов (Structured Output, JSON)
 
