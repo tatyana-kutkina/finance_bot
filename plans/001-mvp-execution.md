@@ -22,11 +22,11 @@
 - [ ] Реализовать базовые репозитории (`BaseRepository`, `UserRepository`, `TransactionRepository`) с методами CRUD.
 
 ### Шаг 3. AI Сервис (Logic Layer)
-- [ ] Создать `AIService` (`services/ai_service.py`).
-- [ ] Реализовать метод `parse_transaction_text(text: str) -> TransactionDTO`:
+- [x] Создать `AIService` (`services/ai_service.py`).
+- [x] Реализовать метод `parse_transaction_text(text: str) -> TransactionDTO`:
     - Подготовить системный промпт для извлечения JSON (сумма, категория, дата).
-    - Интеграция с OpenAI API (или DeepSeek).
-- [ ] Реализовать метод `transcribe_audio(file_path: str) -> str`:
+    - Интеграция с DeepSeek API (MVP), предусмотреть возможность смены модели на GPT в следующей итерации.
+- [x] Реализовать метод `transcribe_audio(file_path: str) -> str`:
     - Интеграция с Whisper API для STT.
 
 ### Шаг 4. Финансовый сервис (Logic Layer)
