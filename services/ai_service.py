@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -12,7 +12,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from openai import AsyncOpenAI, OpenAIError
 
 from core.config import settings
-from services.prompt import SYSTEM_PROMPT
+from services.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 class TransactionDTO:
     amount: Decimal
     category: str
-    date: date
+    date: dt_date
     raw_text: Optional[str] = None
 
 
 class TransactionStructured(BaseModel):
     amount: Decimal = Field(..., description="Сумма траты числом, без валюты")
     category: str = Field(..., min_length=1, description="Краткая категория, одно-два слова")
-    date: date = Field(..., description="Дата операции в формате YYYY-MM-DD")
+    date: dt_date = Field(..., description="Дата операции в формате YYYY-MM-DD")
 
 
 class AIService:
@@ -72,16 +72,16 @@ class AIService:
         return AsyncOpenAI(api_key=api_key)
 
     @staticmethod
-    def _parse_date(value: str | None) -> date:
+    def _parse_date(value: str | None) -> dt_date:
         if not value:
-            return date.today()
+            return dt_date.today()
 
         try:
             return datetime.fromisoformat(value).date()
         except ValueError:
             logger.warning("Не удалось распарсить дату '%s', используем текущую", value)
             # AICODE-TODO: Добавить более умный парсинг дат (NLP) при необходимости.
-            return date.today()
+            return dt_date.today()
 
     async def parse_transaction_text(self, user_text: str) -> TransactionDTO:
         """Парсит текстовое описание траты пользователя в DTO."""
@@ -89,8 +89,8 @@ class AIService:
             raise ValueError("Текст для парсинга пустой")
 
         prompt = SYSTEM_PROMPT.format(
-            today_date=date.today().isoformat(), 
-            transaction_schema=TransactionStructured.model_json_schema()
+            today_date=dt_date.today().isoformat(),
+            transaction_schema=TransactionStructured.model_json_schema(),
         )
         try:
             response = await self.chat_client.chat.completions.create(
