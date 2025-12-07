@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
 from sqlalchemy import func, select
@@ -20,7 +19,7 @@ class TransactionInput:
     """Входные данные для создания транзакции."""
 
     user_id: int
-    amount: Decimal | float | int
+    amount: float
     category: str
     raw_text: Optional[str] = None
     spend_date: Optional[date] = None
@@ -31,7 +30,7 @@ class WeeklyCategoryStat:
     """DTO для статистики по категориям за неделю."""
 
     category: str
-    total: Decimal
+    total: float
 
 
 class FinanceService:
@@ -40,17 +39,6 @@ class FinanceService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.transaction_repo = TransactionRepository(session)
-
-    @staticmethod
-    def _normalize_amount(amount: Decimal | float | int) -> Decimal:
-        try:
-            decimal_amount = Decimal(str(amount))
-        except (InvalidOperation, TypeError) as exc:
-            raise ValueError("Некорректное значение суммы") from exc
-
-        if decimal_amount <= 0:
-            raise ValueError("Сумма должна быть больше нуля")
-        return decimal_amount.quantize(Decimal("0.01"))
 
     @staticmethod
     def _normalize_category(category: str) -> str:
@@ -66,7 +54,7 @@ class FinanceService:
         if data.user_id <= 0:
             raise ValueError("user_id должен быть положительным")
 
-        amount = self._normalize_amount(data.amount)
+        amount = data.amount
         category = self._normalize_category(data.category)
         spend_date = self._normalize_date(data.spend_date)
 
