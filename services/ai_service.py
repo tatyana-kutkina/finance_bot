@@ -80,14 +80,33 @@ class AIService:
             # AICODE-TODO: Добавить более умный парсинг дат (NLP) при необходимости.
             return dt_date.today()
 
-    async def parse_transaction_text(self, user_text: str) -> TransactionDTO:
+    async def parse_transaction_text(
+        self,
+        user_text: str,
+        preferred_categories: Optional[list[str]] = None,
+    ) -> TransactionDTO:
         """Парсит текстовое описание траты пользователя в DTO."""
         if not user_text or not user_text.strip():
             raise ValueError("Текст для парсинга пустой")
 
+        categories_hint = ""
+        if preferred_categories:
+            filtered_categories = [
+                name.strip() for name in preferred_categories if name and name.strip()
+            ]
+            if filtered_categories:
+                categories_block = "\n".join(f"- {name}" for name in filtered_categories)
+                categories_hint = (
+                    "Если описание совпадает с одной из пользовательских категорий, "
+                    "выбери её. Пользовательские категории:\n"
+                    f"{categories_block}\n"
+                    "Если не подходит ни одна, предложи краткую новую категорию.\n"
+                )
+
         prompt = SYSTEM_PROMPT.format(
             today_date=dt_date.today().isoformat(),
             transaction_schema=TransactionStructured.model_json_schema(),
+            categories_hint=categories_hint,
         )
         with self.tracer.start_as_current_span("parse_transaction_text", openinference_span_kind="chain") as span:
             span.set_input(user_text)
