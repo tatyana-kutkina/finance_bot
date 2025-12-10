@@ -4,7 +4,6 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import date as dt_date, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field, SecretStr, ValidationError
@@ -132,17 +131,21 @@ class AIService:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Файл {file_path} не найден")
-
-        try:
-            with path.open("rb") as audio_file:
-                response = await self.audio_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="ru",
-                )
-        except OpenAIError as exc:
-            logger.exception("Ошибка транскрибации Whisper: %s", exc)
-            raise
+        with self.tracer.start_as_current_span("transcribe_audio", openinference_span_kind="chain") as span:
+            try:
+                with path.open("rb") as audio_file:
+                    response = await self.audio_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language="ru",
+                    )
+                span.set_status(Status(StatusCode.OK))
+                span.set_output(response)
+            except OpenAIError as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                logger.exception("Ошибка транскрибации Whisper: %s", exc)
+                raise
 
         text = getattr(response, "text", None)
         if not text:
