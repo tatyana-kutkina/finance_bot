@@ -35,6 +35,9 @@ class User(Base):
     transactions: Mapped[List["Transaction"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    categories: Mapped[List["Category"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Transaction(Base):
@@ -56,4 +59,19 @@ class Transaction(Base):
 
     user: Mapped[User] = relationship(back_populates="transactions")
 
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    match_text: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="categories")
 
