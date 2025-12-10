@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from core.config import settings
 from core.logger import setup_logging
@@ -20,6 +20,19 @@ bot = Bot(token=settings.BOT_TOKEN.get_secret_value())
 dp = Dispatcher()
 ai_service = AIService()
 
+main_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📊 Статистика за 7 дней")],
+        [KeyboardButton(text="ℹ️ Помощь")],
+    ],
+    resize_keyboard=True,
+)
+WELCOME_TEXT = (
+    "Привет! Пришли мне текст или голосовую заметку о трате, "
+    "я сохраню её и помогу вести учёт. Кнопка «Статистика за 7 дней» "
+    "покажет последние расходы."
+)
+
 
 async def ensure_user(session, telegram_id: int):
     repo = UserRepository(session)
@@ -27,6 +40,22 @@ async def ensure_user(session, telegram_id: int):
     if user:
         return user
     return await repo.create(telegram_id=telegram_id)
+
+
+async def send_stats(message: Message):
+    async with get_session() as session:
+        user = await ensure_user(session, message.from_user.id)
+        finance_service = FinanceService(session)
+        stats = await finance_service.get_week_stats(user.id)
+
+    if not stats:
+        await message.answer("За последние 7 дней трат пока нет.", reply_markup=main_menu)
+        return
+
+    lines = [f"• {item.category}: {item.total} RUB" for item in stats]
+    await message.answer(
+        "Статистика за 7 дней:\n" + "\n".join(lines), reply_markup=main_menu
+    )
 
 
 async def process_user_text(
@@ -71,10 +100,22 @@ async def handle_start(message: Message):
     async with get_session() as session:
         await ensure_user(session, message.from_user.id)
 
-    await message.answer(
-        "Привет! Пришли мне текст или голосовую заметку о трате, "
-        "я сохраню её и помогу вести учёт. Команда /stats покажет расходы за неделю."
-    )
+    await message.answer(WELCOME_TEXT, reply_markup=main_menu)
+
+
+@dp.message(Command("help"))
+async def handle_help(message: Message):
+    await message.answer(WELCOME_TEXT, reply_markup=main_menu)
+
+
+@dp.message(F.text == "📊 Статистика за 7 дней")
+async def handle_menu_stats(message: Message):
+    await send_stats(message)
+
+
+@dp.message(F.text == "ℹ️ Помощь")
+async def handle_menu_help(message: Message):
+    await message.answer(WELCOME_TEXT, reply_markup=main_menu)
 
 
 @dp.message(F.text, ~F.text.startswith("/"))
@@ -116,17 +157,7 @@ async def handle_voice(message: Message):
 
 @dp.message(Command("stats", "week"))
 async def handle_stats(message: Message):
-    async with get_session() as session:
-        user = await ensure_user(session, message.from_user.id)
-        finance_service = FinanceService(session)
-        stats = await finance_service.get_week_stats(user.id)
-
-    if not stats:
-        await message.answer("За последние 7 дней трат пока нет.")
-        return
-
-    lines = [f"• {item.category}: {item.total} RUB" for item in stats]
-    await message.answer("Статистика за 7 дней:\n" + "\n".join(lines))
+    await send_stats(message)
 
 
 async def main():
