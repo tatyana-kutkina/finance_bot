@@ -6,6 +6,9 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from core.config import settings
 from core.logger import setup_logging
@@ -17,13 +20,15 @@ from services.finance_service import FinanceService, TransactionInput
 
 logger = logging.getLogger(__name__)
 bot = Bot(token=settings.BOT_TOKEN.get_secret_value())
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 ai_service = AIService()
 
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Статистика за 7 дней")],
         [KeyboardButton(text="ℹ️ Помощь")],
+        [KeyboardButton(text="➕ Добавить категорию")],
+        [KeyboardButton(text="📂 Мои категории")],
     ],
     resize_keyboard=True,
 )
@@ -32,6 +37,11 @@ WELCOME_TEXT = (
     "я сохраню её и помогу вести учёт. Кнопка «Статистика за 7 дней» "
     "покажет последние расходы."
 )
+
+
+class AddCategoryState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_match_text = State()
 
 
 async def ensure_user(session, telegram_id: int):
@@ -61,28 +71,40 @@ async def send_stats(message: Message):
 async def process_user_text(
     message: Message, user_text: str, raw_text: str | None = None
 ):
-    try:
-        parsed = await ai_service.parse_transaction_text(user_text)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Не удалось распарсить сообщение: %s", exc)
-        await message.answer(
-            "Не получилось понять трату. "
-            "Попробуйте переформулировать."
-        )
-        return
-
+    raw_message = raw_text or user_text
     async with get_session() as session:
         try:
             user = await ensure_user(session, message.from_user.id)
             finance_service = FinanceService(session)
+            user_categories = await finance_service.list_categories(user.id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Ошибка при подготовке данных пользователя: %s", exc)
+            await message.answer("Не получилось обработать запрос, попробуйте позже.")
+            return
+
+        try:
+            parsed = await ai_service.parse_transaction_text(
+                user_text,
+                preferred_categories=[category.name for category in user_categories],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Не удалось распарсить сообщение: %s", exc)
+            await message.answer(
+                "Не получилось понять трату. "
+                "Попробуйте переформулировать."
+            )
+            return
+
+        try:
             await finance_service.add_transaction(
                 TransactionInput(
                     user_id=user.id,
                     amount=parsed.amount,
                     category=parsed.category,
-                    raw_text=raw_text or user_text,
+                    raw_text=raw_message,
                     spend_date=parsed.date,
-                )
+                ),
+                user_categories=user_categories,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ошибка при сохранении транзакции: %s", exc)
@@ -106,6 +128,94 @@ async def handle_start(message: Message):
 @dp.message(Command("help"))
 async def handle_help(message: Message):
     await message.answer(WELCOME_TEXT, reply_markup=main_menu)
+
+
+async def _start_add_category_dialog(message: Message, state: FSMContext):
+    await message.answer(
+        "Введите короткое название категории (например, «Кофе вне офиса»)."
+    )
+    await state.set_state(AddCategoryState.waiting_for_name)
+
+
+@dp.message(Command("add_category"))
+async def handle_add_category_start(message: Message, state: FSMContext):
+    await _start_add_category_dialog(message, state)
+
+
+@dp.message(F.text == "➕ Добавить категорию")
+async def handle_add_category_button(message: Message, state: FSMContext):
+    await _start_add_category_dialog(message, state)
+
+
+@dp.message(F.text == "📂 Мои категории")
+async def handle_list_categories(message: Message):
+    async with get_session() as session:
+        user = await ensure_user(session, message.from_user.id)
+        finance_service = FinanceService(session)
+        categories = await finance_service.list_categories(user.id)
+
+    if not categories:
+        await message.answer(
+            "Категорий пока нет. Нажмите «➕ Добавить категорию», чтобы создать первую.",
+            reply_markup=main_menu,
+        )
+        return
+
+    lines = [f"• {item.name} — триггер «{item.match_text}»" for item in categories]
+    await message.answer(
+        "Ваши категории:\n" + "\n".join(lines),
+        reply_markup=main_menu,
+    )
+
+
+@dp.message(AddCategoryState.waiting_for_name)
+async def handle_add_category_name(message: Message, state: FSMContext):
+    category_name = (message.text or "").strip()
+    if not category_name:
+        await message.answer("Название не может быть пустым, попробуйте снова.")
+        return
+
+    await state.update_data(category_name=category_name)
+    await message.answer(
+        "Теперь отправьте фразу-триггер. Если она встретится в сообщении, "
+        "мы применим эту категорию."
+    )
+    await state.set_state(AddCategoryState.waiting_for_match_text)
+
+
+@dp.message(AddCategoryState.waiting_for_match_text)
+async def handle_add_category_match_text(message: Message, state: FSMContext):
+    match_text = (message.text or "").strip()
+    if not match_text:
+        await message.answer("Фраза не может быть пустой, введите её ещё раз.")
+        return
+
+    data = await state.get_data()
+    category_name = data.get("category_name")
+
+    async with get_session() as session:
+        try:
+            user = await ensure_user(session, message.from_user.id)
+            finance_service = FinanceService(session)
+            category = await finance_service.create_category(
+                user_id=user.id,
+                name=category_name,
+                match_text=match_text,
+            )
+        except ValueError as exc:  # noqa: BLE001
+            await message.answer(f"Не получилось сохранить: {exc}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Ошибка при создании категории: %s", exc)
+            await message.answer("Не удалось сохранить категорию, попробуйте позже.")
+            return
+
+    await state.clear()
+    await message.answer(
+        f"Категория «{category.name}» создана. Сообщения с фразой "
+        f"«{category.match_text}» будут относиться к ней.",
+        reply_markup=main_menu,
+    )
 
 
 @dp.message(F.text == "📊 Статистика за 7 дней")
